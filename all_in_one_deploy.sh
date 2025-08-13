@@ -8,8 +8,8 @@ echo "==============================================="
 echo "=== 步骤 1: 检查并安装 Docker ==="
 echo "==============================================="
 
-# Check if Docker is already installed
-if command -v docker &> /dev/null; then
+# Check if Docker service is already active
+if systemctl is-active --quiet docker; then
     echo ">> 已检测到 Docker，跳过安装。"
 else
     echo ">> 未检测到 Docker，开始安装..."
