@@ -101,6 +101,11 @@ if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
         echo "2) 测试环境 (dry-run，用于测试配置，不会消耗申请次数)"
         read -p "请输入您的选择 (1 或 2): " CHOICE
     else
+        read -p "请输入您的邮箱（用于证书续订通知，必填）: " EMAIL
+        if [ -z "$EMAIL" ]; then
+            echo "邮箱不能为空，退出脚本。"
+            exit 1
+        fi
         read -p "请确保您已将证书备份文件上传到服务器的home目录下。请输入文件名（例如：clewdr_ssl_backup.tar.gz）: " CERT_FILE
         if [ -z "$CERT_FILE" ]; then
             echo "文件名不能为空，退出脚本。"
@@ -282,19 +287,39 @@ if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
             echo "证书文件已成功解压到 /etc/letsencrypt/live/ 目录。"
             
             echo "正在配置 Nginx 以启用 HTTPS..."
+            
             if ! command -v certbot &> /dev/null; then
                 echo "检测到 Certbot 未安装，正在安装..."
                 sudo apt update
                 sudo apt install certbot python3-certbot-nginx -y
             fi
             
-            sudo certbot --nginx -d "$SERVER_NAME" --email your-email@example.com --agree-tos --no-eff-email --redirect --dry-run
+            sudo certbot certonly --non-interactive --manual --email "$EMAIL" --agree-tos --cert-name "$SERVER_NAME" --cert-path "/etc/letsencrypt/live/$SERVER_NAME/cert.pem" --key-path "/etc/letsencrypt/live/$SERVER_NAME/privkey.pem" --fullchain-path "/etc/letsencrypt/live/$SERVER_NAME/fullchain.pem" --chain-path "/etc/letsencrypt/live/$SERVER_NAME/chain.pem" --dry-run
+            
+            sudo tee -a "$CONFIG_PATH" > /dev/null <<EOF
+server {
+    listen 443 ssl;
+    server_name $SERVER_NAME;
+
+    ssl_certificate /etc/letsencrypt/live/$SERVER_NAME/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$SERVER_NAME/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+            sudo sed -i 's/listen 80;/listen 80;\n    return 301 https:\/\/\$server_name\$request_uri;/' "$CONFIG_PATH"
             
             sudo nginx -t && sudo systemctl reload nginx
             
             echo "==========================================================="
             echo "恭喜！HTTPS 已成功配置在 https://$SERVER_NAME"
-            echo "脚本已尝试配置自动续签。您可以通过运行 'sudo certbot renew --dry-run' 来验证。"
+            echo "脚本已配置自动续签。您可以通过运行 'sudo certbot renew --dry-run' 来验证。"
             echo "==========================================================="
         else
             echo "证书文件解压失败，请检查文件是否损坏。"
