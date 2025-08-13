@@ -1,3 +1,5 @@
+#!/bin/bash
+
 sudo mkdir -p /etc/clewdr
 cd /etc/clewdr || exit
 
