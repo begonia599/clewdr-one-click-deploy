@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# === 用户输入 ===
 read -p "请输入您要配置 HTTPS 的域名（必填）: " DOMAIN
 if [ -z "$DOMAIN" ]; then
     echo "域名不能为空，退出脚本。"
@@ -12,19 +13,21 @@ if [ -z "$EMAIL" ]; then
     exit 1
 fi
 
+# 询问用户选择正式环境还是测试环境
 echo "请选择证书申请环境："
 echo "1) 正式环境 (推荐，将申请真实证书)"
 echo "2) 测试环境 (dry-run，用于测试配置，不会消耗申请次数)"
 read -p "请输入您的选择 (1 或 2): " CHOICE
 
-DRY_RUN=""
+CERTBOT_CMD=""
 case $CHOICE in
     1)
         echo "您选择了正式环境。"
+        CERTBOT_CMD="sudo certbot --nginx -d "$DOMAIN" --email "$EMAIL" --agree-tos --no-eff-email"
         ;;
     2)
         echo "您选择了测试环境。"
-        DRY_RUN="--dry-run"
+        CERTBOT_CMD="sudo certbot certonly --nginx --dry-run -d "$DOMAIN" --email "$EMAIL" --agree-tos --no-eff-email"
         ;;
     *)
         echo "无效的选择，退出脚本。"
@@ -32,18 +35,22 @@ case $CHOICE in
         ;;
 esac
 
+# === 安装 Certbot（如果未安装） ===
 if ! command -v certbot &> /dev/null; then
     echo "检测到 Certbot 未安装，正在安装..."
     sudo apt update
     sudo apt install certbot python3-certbot-nginx -y
 fi
 
+# === 申请并自动配置证书 ===
 echo "正在为 $DOMAIN 申请 SSL 证书..."
-sudo certbot --nginx $DRY_RUN -d "$DOMAIN" --email "$EMAIL" --agree-tos --no-eff-email
+
+# 使用 eval 来执行动态构建的命令
+eval $CERTBOT_CMD
 
 if [ $? -eq 0 ]; then
     echo "==========================================================="
-    if [ -z "$DRY_RUN" ]; then
+    if [ "$CHOICE" == "1" ]; then
         echo "恭喜！HTTPS 已成功配置在 https://$DOMAIN"
         echo "证书已部署，Nginx 已重载。"
     else
