@@ -197,13 +197,55 @@ if ! command -v nginx &> /dev/null; then
     sudo apt install nginx -y
 fi
 
-echo "正在生成 Nginx 配置文件: $CONFIG_PATH"
+if [ -f "/etc/nginx/sites-available/$CONFIG_NAME" ]; then
+    echo ">> 移除旧的 Nginx 配置文件..."
+    sudo rm "/etc/nginx/sites-available/$CONFIG_NAME"
+fi
+if [ -f "/etc/nginx/sites-enabled/$CONFIG_NAME" ]; then
+    echo ">> 移除旧的 Nginx 软链接..."
+    sudo rm "/etc/nginx/sites-enabled/$CONFIG_NAME"
+fi
+
 if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
     # With a domain
-    sudo tee "$CONFIG_PATH" > /dev/null <<EOF
+    if [[ "$AUTO_CERT" =~ ^[yY]$ ]]; then
+        echo "正在生成 Nginx HTTP 配置文件: $CONFIG_PATH"
+        sudo tee "$CONFIG_PATH" > /dev/null <<EOF
 server {
     listen 80;
     server_name $SERVER_NAME;
+    location / {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    else
+        echo "正在生成 Nginx 包含 HTTP 和 HTTPS 的配置文件: $CONFIG_PATH"
+        sudo tee "$CONFIG_PATH" > /dev/null <<EOF
+server {
+    listen 80;
+    server_name $SERVER_NAME;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name $SERVER_NAME;
+
+    ssl_certificate /etc/letsencrypt/live/$SERVER_NAME/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$SERVER_NAME/privkey.pem;
+
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1h;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384';
+    ssl_prefer_server_ciphers off;
+    ssl_stapling on;
+    ssl_stapling_verify on;
 
     location / {
         proxy_pass http://127.0.0.1:$BACKEND_PORT;
@@ -214,8 +256,10 @@ server {
     }
 }
 EOF
+    fi
 else
     # Without a domain, using IP
+    echo "正在生成 Nginx IP 代理配置文件: $CONFIG_PATH"
     sudo tee "$CONFIG_PATH" > /dev/null <<EOF
 server {
     listen 80 default_server;
@@ -238,7 +282,8 @@ fi
 
 sudo nginx -t && sudo systemctl reload nginx
 
-echo "Nginx HTTP 代理配置完成！请确认防火墙已放行80端口，并尝试访问: http://$SERVER_NAME"
+echo "Nginx 配置完成！"
+echo "请确认防火墙已放行80端口，并尝试访问: http://$SERVER_NAME"
 
 
 # --- 4. Deploy HTTPS (Conditional) ---
@@ -285,7 +330,6 @@ if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
         # Use existing certificate flow
         echo ">> 您选择了使用已有的证书。"
         
-        # Check if the cert file exists. We will assume the user has moved it to /root/
         CERT_PATH="/root/$CERT_FILE"
         if [ ! -f "$CERT_PATH" ]; then
             echo "错误：未找到文件 $CERT_PATH，请检查文件名和路径。"
@@ -298,8 +342,6 @@ if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
         if [ $? -eq 0 ]; then
             echo "证书文件已成功解压到 /etc/letsencrypt/live/ 目录。"
             
-            echo "正在配置 Nginx 以启用 HTTPS..."
-            
             # Step 1: Install Certbot and set up renewal account information.
             if ! command -v certbot &> /dev/null; then
                 echo "检测到 Certbot 未安装，正在安装..."
@@ -309,29 +351,6 @@ if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
             
             # Register the email with Certbot to ensure renewal notifications are sent.
             sudo certbot register --non-interactive --agree-tos -m "$EMAIL"
-            
-            # Step 2: Add Nginx HTTPS configuration to the existing HTTP config file
-            sudo tee -a "$CONFIG_PATH" > /dev/null <<EOF
-server {
-    listen 443 ssl;
-    server_name $SERVER_NAME;
-
-    ssl_certificate /etc/letsencrypt/live/$SERVER_NAME/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$SERVER_NAME/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:$BACKEND_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
-            # Step 3: Update the HTTP block to redirect to HTTPS
-            sudo sed -i 's/listen 80;/listen 80;\n    return 301 https:\/\/\$server_name\$request_uri;/' "$CONFIG_PATH"
-            
-            sudo nginx -t && sudo systemctl reload nginx
             
             echo "==========================================================="
             echo "恭喜！HTTPS 已成功配置在 https://$SERVER_NAME"
