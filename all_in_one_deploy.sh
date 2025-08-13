@@ -5,51 +5,59 @@ set -e
 
 # --- 1. Docker One-Click Installation ---
 echo "==============================================="
-echo "=== 步骤 1: 安装 Docker 和 Docker Compose ==="
+echo "=== 步骤 1: 检查并安装 Docker ==="
 echo "==============================================="
-# Update system dependencies
-echo ">> 更新系统依赖..."
-sudo apt update
-sudo apt upgrade -y
 
-# Install Docker (Official source first, with fallback mirrors)
-echo ">> 正在安装 Docker (官方源，含备用镜像)..."
-if sudo curl -fsSL https://get.docker.com | bash; then
-    echo "Docker 从官方源安装成功。"
+# Check if Docker is already installed
+if command -v docker &> /dev/null; then
+    echo ">> 已检测到 Docker，跳过安装。"
 else
-    echo "警告：官方安装失败，尝试备用镜像..."
-    # Fallback logic from your Docker script
-    if sudo curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun; then
-        echo "Docker 从阿里云镜像安装成功。"
+    echo ">> 未检测到 Docker，开始安装..."
+    # Update system dependencies
+    echo ">> 更新系统依赖..."
+    sudo apt update
+    sudo apt upgrade -y
+
+    # Install Docker (Official source first, with fallback mirrors)
+    echo ">> 正在安装 Docker (官方源，含备用镜像)..."
+    if sudo curl -fsSL https://get.docker.com | bash; then
+        echo "Docker 从官方源安装成功。"
     else
-        echo "警告：阿里云镜像失败，尝试 GitHub 镜像..."
-        if sudo curl -fsSL https://github.com/tech-shrimp/docker_installer/releases/download/latest/linux.sh | bash -s docker --mirror Aliyun; then
-            echo "Docker 从 GitHub 镜像安装成功。"
+        echo "警告：官方安装失败，尝试备用镜像..."
+        # Fallback logic from your Docker script
+        if sudo curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun; then
+            echo "Docker 从阿里云镜像安装成功。"
         else
-            echo "警告：GitHub 镜像失败，尝试 Gitee 镜像..."
-            if sudo curl -fsSL https://gitee.com/tech-shrimp/docker_installer/releases/download/latest/linux.sh | bash -s docker --mirror Aliyun; then
-                echo "Docker 从 Gitee 镜像安装成功。"
+            echo "警告：阿里云镜像失败，尝试 GitHub 镜像..."
+            if sudo curl -fsSL https://github.com/tech-shrimp/docker_installer/releases/download/latest/linux.sh | bash -s docker --mirror Aliyun; then
+                echo "Docker 从 GitHub 镜像安装成功。"
             else
-                echo "错误：Docker 安装失败。请检查网络连接或手动安装。"
-                exit 1
+                echo "警告：GitHub 镜像失败，尝试 Gitee 镜像..."
+                if sudo curl -fsSL https://gitee.com/tech-shrimp/docker_installer/releases/download/latest/linux.sh | bash -s docker --mirror Aliyun; then
+                    echo "Docker 从 Gitee 镜像安装成功。"
+                else
+                    echo "错误：Docker 安装失败。请检查网络连接或手动安装。"
+                    exit 1
+                fi
             fi
         fi
     fi
-fi
 
-# Check Docker compose command
-echo ">> 检查 docker compose 插件..."
-if ! docker compose version &> /dev/null; then
-    echo "错误：'docker compose' 命令未检测到。这可能表明 Docker 安装不完整。"
-    exit 1
-fi
-echo "docker compose 版本: $(docker compose version)"
+    # Check Docker compose command
+    echo ">> 检查 docker compose 插件..."
+    if ! docker compose version &> /dev/null; then
+        echo "错误：'docker compose' 命令未检测到。这可能表明 Docker 安装不完整。"
+        exit 1
+    fi
+    echo "docker compose 版本: $(docker compose version)"
 
-# Add user permissions
-echo ">> 将当前用户添加到 docker 组..."
-sudo usermod -aG docker $USER
-echo "Docker 安装完成！为使权限生效，请重新登录服务器。"
-read -p "按任意键继续... (注意: 如果不重新登录，后续docker命令可能需要sudo)"
+    # Add user permissions
+    echo ">> 将当前用户添加到 docker 组..."
+    sudo usermod -aG docker $USER
+    echo "Docker 安装完成！为使权限生效，请重新登录服务器。"
+    echo "请重新连接后，再次运行此脚本以继续后续部署。"
+    exit 0 # Exit after new installation to enforce re-login
+fi
 
 # --- 2. Deploy Clewdr ---
 echo "==============================================="
