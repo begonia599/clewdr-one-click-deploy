@@ -1,7 +1,9 @@
 #!/bin/bash
 
+# Exit immediately if a command exits with a non-zero status
 set -e
 
+# --- 1. Docker One-Click Installation ---
 echo "==============================================="
 echo "=== 步骤 1: 检查并安装 Docker ==="
 echo "==============================================="
@@ -47,10 +49,12 @@ else
     exit 0
 fi
 
+# --- 2. Deploy Clewdr & Configure All ---
 echo "==============================================="
 echo "=== 步骤 2: 部署 Clewdr 服务并收集所有配置 ==="
 echo "==============================================="
 
+# Collect all user inputs at once
 read -p "请输入 API 密钥 (password)，留空则为空: " API_PASSWORD
 read -p "请输入前端管理密码 (admin_password)，留空则为空: " ADMIN_PASSWORD
 read -p "请输入代理 proxy，留空则为空: " PROXY
@@ -118,6 +122,7 @@ else
 fi
 
 
+# Start Clewdr deployment using collected inputs
 sudo mkdir -p /etc/clewdr
 cd /etc/clewdr || exit
 
@@ -178,6 +183,7 @@ sudo docker ps | grep clewdr
 echo "可用日志查看： sudo docker logs -f clewdr"
 cd - > /dev/null
 
+# --- 3. Deploy Nginx ---
 echo "==============================================="
 echo "=== 步骤 3: 部署 Nginx 并配置 HTTP 代理 ==="
 echo "==============================================="
@@ -193,6 +199,7 @@ fi
 
 echo "正在生成 Nginx 配置文件: $CONFIG_PATH"
 if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
+    # With a domain
     sudo tee "$CONFIG_PATH" > /dev/null <<EOF
 server {
     listen 80;
@@ -208,6 +215,7 @@ server {
 }
 EOF
 else
+    # Without a domain, using IP
     sudo tee "$CONFIG_PATH" > /dev/null <<EOF
 server {
     listen 80 default_server;
@@ -233,12 +241,14 @@ sudo nginx -t && sudo systemctl reload nginx
 echo "Nginx HTTP 代理配置完成！请确认防火墙已放行80端口，并尝试访问: http://$SERVER_NAME"
 
 
+# --- 4. Deploy HTTPS (Conditional) ---
 if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
     echo "==============================================="
     echo "=== 步骤 4: 申请 SSL 证书或使用已有证书 ==="
     echo "==============================================="
     
     if [[ "$AUTO_CERT" =~ ^[yY]$ ]]; then
+        # Auto-apply flow
         CERTBOT_CMD=""
         case $CHOICE in
             1)
@@ -272,9 +282,11 @@ if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
         fi
 
     else
+        # Use existing certificate flow
         echo ">> 您选择了使用已有的证书。"
         
-        CERT_PATH="$HOME/$CERT_FILE"
+        # Check if the cert file exists. We will assume the user has moved it to /root/
+        CERT_PATH="/root/$CERT_FILE"
         if [ ! -f "$CERT_PATH" ]; then
             echo "错误：未找到文件 $CERT_PATH，请检查文件名和路径。"
             exit 1
@@ -288,14 +300,17 @@ if [[ "$HAS_ICP" =~ ^[yY]$ ]]; then
             
             echo "正在配置 Nginx 以启用 HTTPS..."
             
+            # Step 1: Install Certbot and set up renewal account information.
             if ! command -v certbot &> /dev/null; then
                 echo "检测到 Certbot 未安装，正在安装..."
                 sudo apt update
                 sudo apt install certbot python3-certbot-nginx -y
             fi
             
-            sudo certbot certonly --non-interactive --manual --email "$EMAIL" --agree-tos --cert-name "$SERVER_NAME" --cert-path "/etc/letsencrypt/live/$SERVER_NAME/cert.pem" --key-path "/etc/letsencrypt/live/$SERVER_NAME/privkey.pem" --fullchain-path "/etc/letsencrypt/live/$SERVER_NAME/fullchain.pem" --chain-path "/etc/letsencrypt/live/$SERVER_NAME/chain.pem" --dry-run
+            # Register the email with Certbot to ensure renewal notifications are sent.
+            sudo certbot register --non-interactive --agree-tos -m "$EMAIL"
             
+            # Step 2: Add Nginx HTTPS configuration to the existing HTTP config file
             sudo tee -a "$CONFIG_PATH" > /dev/null <<EOF
 server {
     listen 443 ssl;
@@ -313,6 +328,7 @@ server {
     }
 }
 EOF
+            # Step 3: Update the HTTP block to redirect to HTTPS
             sudo sed -i 's/listen 80;/listen 80;\n    return 301 https:\/\/\$server_name\$request_uri;/' "$CONFIG_PATH"
             
             sudo nginx -t && sudo systemctl reload nginx
